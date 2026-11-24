@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tanani</title>
+<meta name="theme-color" content="#000000">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Respaldo art déco por si el archivo de Volstead no está subido -->
+<link href="https://fonts.googleapis.com/css2?family=Limelight&display=swap" rel="stylesheet">
+<style>
+  /* Coloca tu archivo de la tipografía en la carpeta /fonts con uno de estos nombres */
+  @font-face{
+    font-family:'Volstead';
+    src:local('Volstead'),
+        url('fonts/Volstead.woff2') format('woff2'),
+        url('fonts/Volstead.woff') format('woff'),
+        url('fonts/Volstead.otf') format('opentype'),
+        url('fonts/Volstead.ttf') format('truetype');
+    font-display:swap;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#000;overflow:hidden}
+  #wrap{height:100vh;height:100dvh;display:flex;flex-direction:column;align-items:center}
+  canvas{flex:1;width:100%;min-height:0;display:block;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" role="img" aria-label="Ramo de orquídeas animado con el nombre Tanani"></canvas>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('c');
+  let ctx = cv.getContext('2d');
+  const mainCtx = ctx;
+
+  /* ---------- utilidades ---------- */
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const easeOut = x => 1 - Math.pow(1 - x, 3);
+  const easeIO = x => -(Math.cos(Math.PI * x) - 1) / 2;
+  const easeBack = x => { const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+  const rad = d => d * Math.PI / 180;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+
+  /* ---------- lienzo ---------- */
+  let W = 0, H = 0, S = 1, ox = 0, oy = 0, dpr = 1;
+  /* --- ASCII: la escena se dibuja en un lienzo oculto y se traduce a caracteres --- */
+  const OK = 0.5, OW = 400, OH = 540;
+  const off = document.createElement('canvas'); off.width = OW; off.height = OH;
+  const oc = off.getContext('2d', { willReadFrequently: true });
+  const asciiCv = document.createElement('canvas');
+  const ac = asciiCv.getContext('2d');
+  let CW = 7, CH = 10, FS = 11, fn = 0;
+  const RAMP = '.,:;-~=+*o#%@&';
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const r = cv.getBoundingClientRect();
+    W = r.width; H = r.height;
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    S = Math.min(W / 800, H / 1080);
+    ox = (W - 800 * S) / 2;
+    oy = (H - 1080 * S) / 2;
+    asciiCv.width = cv.width; asciiCv.height = cv.height;
+    const small = W < 600;
+    CW = small ? 9 : 7; CH = small ? 12 : 10; FS = small ? 14 : 11;
+  }
+  window.addEventListener('resize', resize);
+
+  /* textura de grano (efecto "tejido" de los pétalos) */
+  const grain = document.createElement('canvas');
+  grain.width = grain.height = 96;
+  (() => {
+    const g = grain.getContext('2d');
+    const img = g.createImageData(96, 96);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = Math.random() < 0.5 ? 0 : 255;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = Math.random() * 90;
+    }
+    g.putImageData(img, 0, 0);
+  })();
+  const grainPat = ctx.createPattern(grain, 'repeat');
+
+  /* ---------- paletas de orquídeas ---------- */
+  const PAL = [
+    { in: '#fffafc', out: '#f6a9cb', lip: '#d6338a', spot: '#8a0f55', col: '#fff3b0' },
+    { in: '#ffd3ee', out: '#b8157f', lip: '#ffd14d', spot: '#c4521a', col: '#fff3b0' },
+    { in: '#efdcff', out: '#7a2cc0', lip: '#ffcf40', spot: '#6a1f9a', col: '#ffffff' },
+    { in: '#ffe6f1', out: '#ea5a9c', lip: '#a3126a', spot: '#4e0a35', col: '#ffffff' },
+    { in: '#ffffff', out: '#f4e08a', lip: '#e9a216', spot: '#c0281c', col: '#fff9d0' },
+    { in: '#fff4a8', out: '#dfa019', lip: '#b3261e', spot: '#5c0e0a', col: '#ffffff' },
+    { in: '#ffa392', out: '#a80f20', lip: '#ffd24a', spot: '#6d0a14', col: '#fff3b0' },
+    { in: '#f8f1ff', out: '#a68ae0', lip: '#7a3fb8', spot: '#3b1a66', col: '#ffffff' },
+  ];
+
+  /* ---------- ramo: posición de cada orquídea ---------- */
+  const BASE = { x: 400, y: 800 };
+  const FL = [
+    { x: 400, y: 205, s: 1.08, p: 0 },
+    { x: 250, y: 290, s: 0.98, p: 1 },
+    { x: 552, y: 285, s: 0.98, p: 2 },
+    { x: 334, y: 408, s: 1.04, p: 3 },
+    { x: 470, y: 402, s: 1.04, p: 4 },
+    { x: 178, y: 455, s: 0.86, p: 5 },
+    { x: 626, y: 450, s: 0.86, p: 6 },
+    { x: 400, y: 530, s: 0.94, p: 7 },
+    { x: 262, y: 560, s: 0.74, p: 3 },
+    { x: 540, y: 556, s: 0.74, p: 0 },
+  ];
+  FL.forEach((f, i) => { f.i = i; f.ph = rnd(0, 6.28); f.rotJ = rnd(-0.12, 0.12); f.bx = BASE.x + (i - 4.5) * 3; });
+  const drawOrder = FL.slice().sort((a, b) => a.y - b.y);
+
+  /* hojas: [ángulo, largo, ancho, curvatura, retraso] */
+  const LEAVES = [
+    [-80, 215, 30, -46, 1.7], [-66, 305, 38, -52, 1.0], [-44, 345, 40, -36, 1.25], [-22, 300, 34, -18, 1.55],
+    [22, 310, 34, 18, 1.45], [46, 345, 40, 36, 1.15], [68, 292, 38, 52, 0.9], [80, 215, 30, 46, 1.65],
+  ];
+
+  /* estrellas y partículas */
+  const STARS = Array.from({ length: 110 }, () => ({ x: Math.random(), y: Math.random(), r: rnd(0.4, 1.5), ph: rnd(0, 6.28), sp: rnd(0.6, 2.2) }));
+  const MOTES = Array.from({ length: 34 }, () => ({ x: Math.random(), y: Math.random(), r: rnd(0.8, 2.6), v: rnd(0.012, 0.035), ph: rnd(0, 6.28), hue: rnd(300, 345) }));
+
+  /* ---------- dibujo de pétalos ---------- */
+  function petalPath(L, Wd) {
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.bezierCurveTo(-Wd * 0.55, -L * 0.12, -Wd * 1.0, -L * 0.62, -Wd * 0.35, -L * 0.93);
+    ctx.quadraticCurveTo(0, -L * 1.08, Wd * 0.35, -L * 0.93);
+    ctx.bezierCurveTo(Wd * 1.0, -L * 0.62, Wd * 0.55, -L * 0.12, 0, 0);
+    ctx.closePath();
+  }
+
+  function petal(ang, L, Wd, c1, c2, e, open) {
+    if (e <= 0.01) return;
+    ctx.save();
+    ctx.rotate(rad(ang * (0.12 + 0.88 * clamp(open, 0, 1.15))));
+    ctx.scale(e, e);
+    petalPath(L, Wd);
+    const g = ctx.createLinearGradient(0, 0, 0, -L);
+    g.addColorStop(0, c1);
+    g.addColorStop(0.55, c1);
+    g.addColorStop(1, c2);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    /* borde más intenso */
+    ctx.strokeStyle = c2; ctx.globalAlpha = 0.35; ctx.lineWidth = 6; ctx.stroke();
+    /* venas */
+    ctx.globalAlpha = 0.16; ctx.lineWidth = 0.9; ctx.strokeStyle = '#3a0030';
+    for (let k = -3; k <= 3; k++) {
+      ctx.beginPath();
+      ctx.moveTo(0, -L * 0.04);
+      ctx.quadraticCurveTo(k * Wd * 0.3, -L * 0.5, k * Wd * 0.42, -L * 0.9);
+      ctx.stroke();
+    }
+    /* grano */
+    ctx.globalAlpha = 0.22; ctx.fillStyle = grainPat;
+    ctx.fillRect(-Wd * 1.2, -L * 1.2, Wd * 2.4, L * 1.3);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(40,0,30,.22)'; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.restore();
+  }
+
+  function orchid(x, y, size, rot, pal, bloom, t) {
+    const P = PAL[pal];
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.scale(size, size);
+
+    /* resplandor suave */
+    const glow = ctx.createRadialGradient(0, 0, 10, 0, 0, 120);
+    glow.addColorStop(0, P.out + '40');
+    glow.addColorStop(1, P.out + '00');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(0, 0, 120, 0, 6.2832); ctx.fill();
+
+    const E = i => easeBack(clamp((bloom - i * 0.07) / 0.55));
+    const O = i => easeOut(clamp((bloom - 0.05 - i * 0.07) / 0.7));
+    petal(-148, 88, 40, P.in, P.out, E(0), O(0));      /* sépalo inf. izq. */
+    petal(148, 88, 40, P.in, P.out, E(1), O(1));       /* sépalo inf. der. */
+    petal(0, 94, 44, P.in, P.out, E(2), O(2));         /* sépalo superior */
+    petal(-80, 94, 64, P.in, P.out, E(3), O(3));       /* pétalo grande izq. */
+    petal(80, 94, 64, P.in, P.out, E(4), O(4));        /* pétalo grande der. */
+
+    /* labelo */
+    const eL = E(5);
+    if (eL > 0.01) {
+      ctx.save();
+      ctx.rotate(rad(180 * (0.12 + 0.88 * clamp(O(5), 0, 1.1))));
+      ctx.scale(eL, eL);
+      petalPath(52, 27);
+      const lg = ctx.createLinearGradient(0, 0, 0, -52);
+      lg.addColorStop(0, P.spot); lg.addColorStop(0.35, P.lip); lg.addColorStop(1, P.lip);
+      ctx.fillStyle = lg; ctx.fill();
+      ctx.save(); ctx.clip();
+      ctx.globalAlpha = 0.25; ctx.fillStyle = grainPat; ctx.fillRect(-40, -60, 80, 70);
+      ctx.restore();
+      ctx.restore();
+    }
+    /* columna y puntitos */
+    const eC = clamp((bloom - 0.35) / 0.4);
+    if (eC > 0) {
+      ctx.save(); ctx.scale(eC, eC);
+      ctx.fillStyle = P.spot;
+      for (let k = 0; k < 7; k++) {
+        const a = k * 2.4 + 1; const r = 8 + (k % 3) * 5;
+        ctx.globalAlpha = 0.55;
+        ctx.beginPath(); ctx.arc(Math.cos(a) * r * 0.9, 12 + Math.sin(a) * r * 0.5, 1.5, 0, 6.2832); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      const cg = ctx.createRadialGradient(-2, -3, 1, 0, 0, 10);
+      cg.addColorStop(0, '#ffffff'); cg.addColorStop(1, P.col);
+      ctx.fillStyle = cg;
+      ctx.beginPath(); ctx.ellipse(0, -2, 8, 10, 0, 0, 6.2832); ctx.fill();
+      ctx.fillStyle = 'rgba(120,60,0,.55)';
+      ctx.beginPath(); ctx.arc(0, 1, 2.6, 0, 6.2832); ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /* ---------- tallos, hojas, lazo ---------- */
+  const qb = (a, c, b, u) => {
+    const v = 1 - u;
+    return { x: v * v * a.x + 2 * v * u * c.x + u * u * b.x, y: v * v * a.y + 2 * v * u * c.y + u * u * b.y };
+  };
+
+  function leaf(def, t, sway) {
+    const [ang, L, w, bend, d] = def;
+    const g = easeOut(clamp((t - d) / 2.6));
+    if (g <= 0) return;
+    ctx.save();
+    ctx.translate(BASE.x, BASE.y + 6);
+    ctx.rotate(rad(ang) + sway * 0.03 * Math.sign(ang));
+    ctx.scale(g, g);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(-w + bend * 0.5, -L * 0.5, bend, -L);
+    ctx.quadraticCurveTo(w + bend * 0.5, -L * 0.5, 0, 0);
+    const gr = ctx.createLinearGradient(0, 0, bend, -L);
+    gr.addColorStop(0, '#0f3f1c'); gr.addColorStop(0.5, '#1f7a38'); gr.addColorStop(1, '#58b868');
+    ctx.fillStyle = gr; ctx.fill();
+    ctx.save(); ctx.clip(); ctx.globalAlpha = 0.2; ctx.fillStyle = grainPat; ctx.fillRect(-100, -L - 20, 200 + Math.abs(bend), L + 40); ctx.restore();
+    ctx.strokeStyle = 'rgba(190,255,200,.28)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(bend * 0.3, -L * 0.5, bend, -L); ctx.stroke();
+    ctx.restore();
+  }
+
+  function ribbon(g) {
+    if (g <= 0) return;
+    ctx.save();
+    ctx.translate(BASE.x, BASE.y - 12);
+    ctx.scale(g, g);
+    const grad = ctx.createLinearGradient(-50, -20, 50, 60);
+    grad.addColorStop(0, '#ffd0e6'); grad.addColorStop(1, '#c43b8c');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.ellipse(0, 6, 34, 13, 0, 0, 6.2832); ctx.fill();
+    for (const m of [1, -1]) {
+      ctx.save(); ctx.scale(m, 1);
+      ctx.beginPath();
+      ctx.moveTo(-2, 4); ctx.quadraticCurveTo(-26, 46, -52, 100);
+      ctx.lineTo(-34, 92); ctx.lineTo(-30, 108);
+      ctx.quadraticCurveTo(-10, 54, 6, 8); ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.bezierCurveTo(-32, -38, -70, -20, -58, 8);
+      ctx.bezierCurveTo(-52, 28, -24, 20, 0, 5); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+    ctx.fillStyle = '#e2589f';
+    ctx.beginPath(); ctx.ellipse(0, 3, 11, 10, 0, 0, 6.2832); ctx.fill();
+    ctx.restore();
+  }
+
+  /* ---------- escena -> ASCII ---------- */
+  function drawScene(t) {
+    ctx = oc;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, OW, OH);
+    ctx.setTransform(OK, 0, 0, OK, 0, 0);
+    const swayAmt = easeIO(clamp((t - 5) / 3));
+    const sw0 = Math.sin(t * 0.8);
+
+    /* posiciones y tallos */
+    const geo = FL.map((f, i) => {
+      const st = 0.3 + i * 0.26, dur = 1.9;
+      const sp = easeIO(clamp((t - st) / dur));
+      const sx = swayAmt * Math.sin(t * 0.9 + f.ph) * 7;
+      const H_ = { x: f.x + sx, y: f.y + swayAmt * Math.cos(t * 0.7 + f.ph) * 2 };
+      const B_ = { x: f.bx, y: BASE.y };
+      const C_ = { x: B_.x + (H_.x - B_.x) * 0.12 + sx * 0.3, y: B_.y + (H_.y - B_.y) * 0.62 };
+      return { f, st, dur, sp, H_, B_, C_ };
+    });
+
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const g of geo) {
+      if (g.sp <= 0.001) continue;
+      const n = Math.max(3, Math.ceil(50 * g.sp));
+      ctx.beginPath();
+      for (let k = 0; k <= n; k++) {
+        const p = qb(g.B_, g.C_, g.H_, (k / n) * g.sp);
+        k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y);
+      }
+      ctx.strokeStyle = '#1d6a30'; ctx.lineWidth = 5.5; ctx.stroke();
+      ctx.strokeStyle = 'rgba(150,235,160,.35)'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+
+    /* hojas */
+    LEAVES.forEach(l => leaf(l, t, sw0 * swayAmt));
+
+    /* lazo */
+    ribbon(easeBack(clamp((t - 4.2) / 1.1)));
+
+    /* flores (las de arriba quedan detrás) */
+    for (const f of drawOrder) {
+      const g = geo[f.i];
+      if (g.sp <= 0.04) continue;
+      const tip = qb(g.B_, g.C_, g.H_, g.sp);
+      const u = g.sp;
+      const dx = 2 * (1 - u) * (g.C_.x - g.B_.x) + 2 * u * (g.H_.x - g.C_.x);
+      const dy = 2 * (1 - u) * (g.C_.y - g.B_.y) + 2 * u * (g.H_.y - g.C_.y);
+      const rot = Math.atan2(dx, -dy) * 0.75 + f.rotJ + swayAmt * Math.sin(t * 0.9 + f.ph) * 0.035;
+      const bloom = clamp((t - (g.st + g.dur * 0.8)) / 2.6);
+      const size = 0.9 * f.s * (0.3 + 0.7 * easeOut(bloom)) * easeOut(clamp(g.sp * 1.4));
+      orchid(tip.x, tip.y, size, rot, f.p, bloom, t);
+    }
+
+    drawName(t);
+    ctx = mainCtx;
+  }
+
+  /* ---------- nombre: se dibuja con la tipografía y se vuelve ASCII ---------- */
+  const NAME = 'Tanani', NAME_SIZE = 150, NAME_Y = 1000, NAME_START = 5.6;
+  const NAME_FONT = NAME_SIZE + 'px "Volstead","Limelight",serif';
+  ['Volstead', 'Limelight'].forEach(f => { try { document.fonts.load(NAME_SIZE + 'px "' + f + '"').catch(() => {}); } catch (e) {} });
+  function drawName(t) {
+    ctx.font = NAME_FONT;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    const gap = NAME_SIZE * 0.07;
+    const w = [...NAME].map(ch => ctx.measureText(ch).width);
+    const total = w.reduce((a, b) => a + b, 0) + gap * (NAME.length - 1);
+    let x = 400 - total / 2;
+    const grad = ctx.createLinearGradient(0, NAME_Y - NAME_SIZE / 2, 0, NAME_Y + NAME_SIZE / 2);
+    grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, '#ffb9e0');
+    for (let i = 0; i < NAME.length; i++) {
+      const a = easeOut(clamp((t - NAME_START - i * 0.22) / 1.3));
+      if (a > 0) {
+        ctx.globalAlpha = a;
+        ctx.fillStyle = grad; ctx.strokeStyle = grad; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+        const y = NAME_Y + (1 - a) * 18;
+        ctx.fillText(NAME[i], x, y);
+        ctx.strokeText(NAME[i], x, y);
+      }
+      x += w[i] + gap;
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function renderAscii(t) {
+    drawScene(t);
+    const d = oc.getImageData(0, 0, OW, OH).data;
+    ac.setTransform(1, 0, 0, 1, 0, 0);
+    ac.clearRect(0, 0, asciiCv.width, asciiCv.height);
+    ac.setTransform(dpr * S, 0, 0, dpr * S, dpr * ox, dpr * oy);
+    ac.font = 'bold ' + FS + 'px ui-monospace,Menlo,Consolas,"Courier New",monospace';
+    ac.textAlign = 'center'; ac.textBaseline = 'middle';
+    const cols = Math.floor(800 / CW), rows = Math.floor(1080 / CH);
+    for (let r = 0; r < rows; r++) {
+      const y0 = Math.floor(r * CH * OK), y1 = Math.min(OH, Math.ceil((r + 1) * CH * OK));
+      for (let c = 0; c < cols; c++) {
+        const x0 = Math.floor(c * CW * OK), x1 = Math.min(OW, Math.ceil((c + 1) * CW * OK));
+        let R = 0, G = 0, B = 0, n = 0;
+        for (let y = y0; y < y1; y++) {
+          let i = (y * OW + x0) * 4;
+          for (let x = x0; x < x1; x++, i += 4) { R += d[i]; G += d[i + 1]; B += d[i + 2]; n++; }
+        }
+        if (!n) continue;
+        R /= n; G /= n; B /= n;
+        const lum = (0.299 * R + 0.587 * G + 0.114 * B) / 255;
+        if (lum < 0.06) continue;
+        const idx = Math.min(RAMP.length - 1, Math.floor(Math.pow(lum, 0.75) * RAMP.length));
+        const m = Math.max(R, G, B) || 1, f = Math.min(1.55, 255 / m);
+        ac.fillStyle = 'rgb(' + Math.min(255, R * f | 0) + ',' + Math.min(255, G * f | 0) + ',' + Math.min(255, B * f | 0) + ')';
+        ac.fillText(RAMP[idx], (c + 0.5) * CW, (r + 0.5) * CH);
+      }
+    }
+  }
+
+  /* ---------- bucle principal ---------- */
+  let t0 = performance.now();
+  cv.addEventListener('click', () => { t0 = performance.now(); });
+
+  function frame(now) {
+    const t = (now - t0) / 1000;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    /* estrellas */
+    for (const s of STARS) {
+      const a = (0.2 + 0.8 * (0.5 + 0.5 * Math.sin(t * s.sp + s.ph))) * clamp(t / 1.5) * 0.85;
+      ctx.fillStyle = 'rgba(255,255,255,' + a.toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, 6.2832); ctx.fill();
+    }
+
+    if (fn++ % 2 === 0) renderAscii(t);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(asciiCv, 0, 0);
+
+    /* partículas flotando */
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const mt = clamp((t - 5.5) / 2);
+    if (mt > 0) {
+      for (const m of MOTES) {
+        const yy = ((m.y - t * m.v) % 1 + 1) % 1;
+        const xx = m.x + Math.sin(t * 0.5 + m.ph) * 0.02;
+        const a = (0.15 + 0.45 * (0.5 + 0.5 * Math.sin(t * 1.3 + m.ph))) * mt;
+        ctx.fillStyle = 'hsla(' + m.hue + ',90%,80%,' + a.toFixed(3) + ')';
+        ctx.beginPath(); ctx.arc(xx * W, yy * H, m.r, 0, 6.2832); ctx.fill();
+      }
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
