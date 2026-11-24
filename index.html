@@ -64,12 +64,12 @@
   const oc = off.getContext('2d', { willReadFrequently: true });
   const asciiCv = document.createElement('canvas');
   const ac = asciiCv.getContext('2d');
-  let CW = 7, CH = 10, FS = 11, fn = 0, skip = 2;
+  let CW = 7, CH = 10, FS = 11, fn = 0, skip = 2, lvl = 0;
   const glyphCache = new Map();
   const RAMP = '.,:;-~=+*o#%@&';
   function resize() {
     const r = cv.getBoundingClientRect();
-    dpr = Math.min(window.devicePixelRatio || 1, r.width < 600 ? 1.5 : 2);
+    dpr = lvl >= 2 ? 1 : Math.min(window.devicePixelRatio || 1, r.width < 600 ? 1.5 : 2);
     W = r.width; H = r.height;
     cv.width = Math.round(W * dpr);
     cv.height = Math.round(H * dpr);
@@ -78,10 +78,16 @@
     oy = (H - 1080 * S) / 2;
     asciiCv.width = cv.width; asciiCv.height = cv.height;
     const small = W < 600;
-    OK = small ? 0.42 : 0.6; OW = Math.round(800 * OK); OH = Math.round(1080 * OK);
+    /* nivel de calidad: 0 normal, 1 y 2 más ligeros (se activan solos si va lento) */
+    const Q = [
+      small ? { ok: 0.42, cw: 8, ch: 11, fs: 12 } : { ok: 0.6, cw: 6, ch: 8, fs: 9.5 },
+      { ok: 0.36, cw: 10, ch: 14, fs: 15 },
+      { ok: 0.3, cw: 12, ch: 16, fs: 17 },
+    ][lvl];
+    OK = Q.ok; OW = Math.round(800 * OK); OH = Math.round(1080 * OK);
     off.width = OW; off.height = OH;
     glyphCache.clear();
-    CW = small ? 8 : 6; CH = small ? 11 : 8; FS = small ? 12 : 9.5;
+    CW = Q.cw; CH = Q.ch; FS = Q.fs;
   }
   window.addEventListener('resize', resize);
 
@@ -489,7 +495,7 @@
         videoId: YT_ID,
         playerVars: { playsinline: 1, controls: 0, disablekb: 1, rel: 0, modestbranding: 1 },
         events: {
-          onReady: () => { ytReady = true; if (musicOn) { yt.playVideo(); fadeIn(); } },
+          onReady: () => { ytReady = true; try { yt.setPlaybackQuality('tiny'); } catch (e) {} if (musicOn) { yt.playVideo(); fadeIn(); } },
           onStateChange: e => { if (e.data === 0) { yt.seekTo(0); yt.playVideo(); } }
         }
       });
@@ -506,7 +512,21 @@
   });
   cv.addEventListener('click', () => { if (started) t0 = performance.now(); });
 
+  let lastNow = 0, ema = 16, lastCheck = 0, dbgEl = null;
+  if (/[?&]debug/.test(location.search)) {
+    dbgEl = document.createElement('div');
+    dbgEl.style.cssText = 'position:fixed;left:8px;top:8px;z-index:9;color:#9f9;font:12px monospace;background:rgba(0,0,0,.6);padding:4px 6px';
+    document.body.appendChild(dbgEl);
+  }
+
   function frame(now) {
+    if (lastNow) ema = ema * 0.92 + Math.min(200, now - lastNow) * 0.08;
+    lastNow = now;
+    if (started && now - lastCheck > 2500) {
+      lastCheck = now;
+      if (ema > 38 && lvl < 2) { lvl++; resize(); ema = 16; }
+    }
+    if (dbgEl) dbgEl.textContent = Math.round(1000 / ema) + ' fps · nivel ' + lvl + ' · skip ' + skip;
     const t = started ? (now - t0) / 1000 : 0;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#000';
