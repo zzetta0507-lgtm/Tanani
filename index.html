@@ -59,16 +59,17 @@
   /* ---------- lienzo ---------- */
   let W = 0, H = 0, S = 1, ox = 0, oy = 0, dpr = 1;
   /* --- ASCII: la escena se dibuja en un lienzo oculto y se traduce a caracteres --- */
-  const OK = 0.6, OW = 480, OH = 648;
+  let OK = 0.6, OW = 480, OH = 648;
   const off = document.createElement('canvas'); off.width = OW; off.height = OH;
   const oc = off.getContext('2d', { willReadFrequently: true });
   const asciiCv = document.createElement('canvas');
   const ac = asciiCv.getContext('2d');
-  let CW = 7, CH = 10, FS = 11, fn = 0;
+  let CW = 7, CH = 10, FS = 11, fn = 0, skip = 2;
+  const glyphCache = new Map();
   const RAMP = '.,:;-~=+*o#%@&';
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
     const r = cv.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, r.width < 600 ? 1.5 : 2);
     W = r.width; H = r.height;
     cv.width = Math.round(W * dpr);
     cv.height = Math.round(H * dpr);
@@ -77,6 +78,9 @@
     oy = (H - 1080 * S) / 2;
     asciiCv.width = cv.width; asciiCv.height = cv.height;
     const small = W < 600;
+    OK = small ? 0.42 : 0.6; OW = Math.round(800 * OK); OH = Math.round(1080 * OK);
+    off.width = OW; off.height = OH;
+    glyphCache.clear();
     CW = small ? 8 : 6; CH = small ? 11 : 8; FS = small ? 12 : 9.5;
   }
   window.addEventListener('resize', resize);
@@ -180,23 +184,8 @@
     g.addColorStop(1, c2);
     ctx.fillStyle = g;
     ctx.fill();
-    ctx.save();
-    ctx.clip();
-    /* borde más intenso */
-    ctx.strokeStyle = c2; ctx.globalAlpha = 0.35; ctx.lineWidth = 6; ctx.stroke();
-    /* venas */
-    ctx.globalAlpha = 0.16; ctx.lineWidth = 0.9; ctx.strokeStyle = '#3a0030';
-    for (let k = -3; k <= 3; k++) {
-      ctx.beginPath();
-      ctx.moveTo(0, -L * 0.04);
-      ctx.quadraticCurveTo(k * Wd * 0.3, -L * 0.5, k * Wd * 0.42, -L * 0.9);
-      ctx.stroke();
-    }
-    /* grano */
-    ctx.globalAlpha = 0.22; ctx.fillStyle = grainPat;
-    ctx.fillRect(-Wd * 1.2, -L * 1.2, Wd * 2.4, L * 1.3);
-    ctx.restore();
-    ctx.strokeStyle = 'rgba(40,0,30,.22)'; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.globalAlpha = 0.3; ctx.strokeStyle = c2; ctx.lineWidth = 4; ctx.stroke();
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 
@@ -234,9 +223,6 @@
       const lg = ctx.createLinearGradient(0, 0, 0, -52);
       lg.addColorStop(0, P.spot); lg.addColorStop(0.35, P.lip); lg.addColorStop(1, P.lip);
       ctx.fillStyle = lg; ctx.fill();
-      ctx.save(); ctx.clip();
-      ctx.globalAlpha = 0.25; ctx.fillStyle = grainPat; ctx.fillRect(-40, -60, 80, 70);
-      ctx.restore();
       ctx.restore();
     }
     /* columna y puntitos */
@@ -285,10 +271,8 @@
     const gr = ctx.createLinearGradient(0, 0, b, -L);
     gr.addColorStop(0, c[0]); gr.addColorStop(0.5, c[1]); gr.addColorStop(1, c[2]);
     ctx.fillStyle = gr; ctx.fill();
-    ctx.save(); ctx.clip();
-    ctx.globalAlpha = 0.2; ctx.fillStyle = grainPat; ctx.fillRect(-200, -L - 20, 400, L + 40);
-    ctx.globalAlpha = 0.35; ctx.strokeStyle = c[2]; ctx.lineWidth = 5; ctx.stroke();
-    ctx.restore();
+    ctx.globalAlpha = 0.3; ctx.strokeStyle = c[2]; ctx.lineWidth = 3; ctx.stroke();
+    ctx.globalAlpha = 1;
     ctx.strokeStyle = 'rgba(200,255,205,.3)'; ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.moveTo(0, 0);
     ctx.bezierCurveTo((l.w2 - l.w1) / 2, -L * 0.25, (l.w2 - l.w1) * 0.4 + b * 0.6, -L * 0.72, b, -L);
@@ -417,15 +401,29 @@
     ctx.globalAlpha = 1;
   }
 
+  function glyph(idx, qr, qg, qb) {
+    const key = idx * 512 + qr * 64 + qg * 8 + qb;
+    let g = glyphCache.get(key);
+    if (!g) {
+      const w = Math.ceil(CW * S * dpr) + 2, h = Math.ceil(CH * S * dpr) + 2;
+      g = document.createElement('canvas'); g.width = w; g.height = h;
+      const c = g.getContext('2d');
+      c.font = 'bold ' + (FS * S * dpr) + 'px ui-monospace,Menlo,Consolas,"Courier New",monospace';
+      c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillStyle = 'rgb(' + Math.round(qr * 255 / 7) + ',' + Math.round(qg * 255 / 7) + ',' + Math.round(qb * 255 / 7) + ')';
+      c.fillText(RAMP[idx], w / 2, h / 2);
+      glyphCache.set(key, g);
+    }
+    return g;
+  }
+
   function renderAscii(t) {
     drawScene(t);
     const d = oc.getImageData(0, 0, OW, OH).data;
     ac.setTransform(1, 0, 0, 1, 0, 0);
     ac.clearRect(0, 0, asciiCv.width, asciiCv.height);
-    ac.setTransform(dpr * S, 0, 0, dpr * S, dpr * ox, dpr * oy);
-    ac.font = 'bold ' + FS + 'px ui-monospace,Menlo,Consolas,"Courier New",monospace';
-    ac.textAlign = 'center'; ac.textBaseline = 'middle';
     const cols = Math.floor(800 / CW), rows = Math.floor(1080 / CH);
+    const cwp = CW * S * dpr, chp = CH * S * dpr, offx = ox * dpr, offy = oy * dpr;
     for (let r = 0; r < rows; r++) {
       const y0 = Math.floor(r * CH * OK), y1 = Math.min(OH, Math.ceil((r + 1) * CH * OK));
       for (let c = 0; c < cols; c++) {
@@ -440,9 +438,9 @@
         const lum = (0.299 * R + 0.587 * G + 0.114 * B) / 255;
         if (lum < 0.06) continue;
         const idx = Math.min(RAMP.length - 1, Math.floor(Math.pow(lum, 0.75) * RAMP.length));
-        const m = Math.max(R, G, B) || 1, f = Math.min(1.55, 255 / m);
-        ac.fillStyle = 'rgb(' + Math.min(255, R * f | 0) + ',' + Math.min(255, G * f | 0) + ',' + Math.min(255, B * f | 0) + ')';
-        ac.fillText(RAMP[idx], (c + 0.5) * CW, (r + 0.5) * CH);
+        const m = Math.max(R, G, B) || 1, f = Math.min(1.55, 255 / m) / 255 * 7;
+        const g = glyph(idx, Math.min(7, Math.round(R * f)), Math.min(7, Math.round(G * f)), Math.min(7, Math.round(B * f)));
+        ac.drawImage(g, Math.round(offx + (c + 0.5) * cwp - g.width / 2), Math.round(offy + (r + 0.5) * chp - g.height / 2));
       }
     }
   }
@@ -521,7 +519,12 @@
       ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, 6.2832); ctx.fill();
     }
 
-    if (fn++ % 2 === 0) renderAscii(t);
+    if (fn++ % skip === 0) {
+      const s0 = performance.now();
+      renderAscii(t);
+      const dt = performance.now() - s0;
+      skip = dt > 24 ? 4 : dt > 14 ? 3 : 2;
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(asciiCv, 0, 0);
 
