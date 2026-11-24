@@ -24,9 +24,20 @@
   html,body{height:100%;background:#000;overflow:hidden}
   #wrap{height:100vh;height:100dvh;display:flex;flex-direction:column;align-items:center}
   canvas{flex:1;width:100%;min-height:0;display:block;cursor:pointer}
+  #start{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;z-index:5;cursor:pointer;transition:opacity 1.2s ease}
+  #start.hide{opacity:0;pointer-events:none}
+  #start span{font-family:'Volstead','Limelight',serif;color:#ffc4e4;font-size:clamp(22px,5vw,34px);letter-spacing:.12em;animation:pulse 2.2s ease-in-out infinite;text-shadow:0 0 14px rgba(255,150,215,.5)}
+  @keyframes pulse{50%{opacity:.3}}
+  #mute{position:fixed;top:14px;right:16px;z-index:4;width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,196,228,.4);background:rgba(0,0,0,.4);color:#ffc4e4;font-size:18px;cursor:pointer;opacity:.7;transition:opacity .3s}
+  #mute:hover{opacity:1}
+  #mute.off{opacity:.35;text-decoration:line-through}
 </style>
 </head>
 <body>
+<div id="start"><span>Toca para abrir</span></div>
+<button id="mute" aria-label="Activar o silenciar la música">♪</button>
+<div id="yt" style="position:fixed;left:-9999px;top:0;width:220px;height:220px"></div>
+<audio id="bgm" src="music/cancion.mp3" loop preload="auto"></audio>
 <div id="wrap">
   <canvas id="c" role="img" aria-label="Ramo de orquídeas animado con el nombre Tanani"></canvas>
 </div>
@@ -48,7 +59,7 @@
   /* ---------- lienzo ---------- */
   let W = 0, H = 0, S = 1, ox = 0, oy = 0, dpr = 1;
   /* --- ASCII: la escena se dibuja en un lienzo oculto y se traduce a caracteres --- */
-  const OK = 0.5, OW = 400, OH = 540;
+  const OK = 0.6, OW = 480, OH = 648;
   const off = document.createElement('canvas'); off.width = OW; off.height = OH;
   const oc = off.getContext('2d', { willReadFrequently: true });
   const asciiCv = document.createElement('canvas');
@@ -66,7 +77,7 @@
     oy = (H - 1080 * S) / 2;
     asciiCv.width = cv.width; asciiCv.height = cv.height;
     const small = W < 600;
-    CW = small ? 9 : 7; CH = small ? 12 : 10; FS = small ? 14 : 11;
+    CW = small ? 8 : 6; CH = small ? 11 : 8; FS = small ? 12 : 9.5;
   }
   window.addEventListener('resize', resize);
 
@@ -100,25 +111,47 @@
   /* ---------- ramo: posición de cada orquídea ---------- */
   const BASE = { x: 400, y: 800 };
   const FL = [
-    { x: 400, y: 205, s: 1.08, p: 0 },
-    { x: 250, y: 290, s: 0.98, p: 1 },
-    { x: 552, y: 285, s: 0.98, p: 2 },
-    { x: 334, y: 408, s: 1.04, p: 3 },
-    { x: 470, y: 402, s: 1.04, p: 4 },
-    { x: 178, y: 455, s: 0.86, p: 5 },
-    { x: 626, y: 450, s: 0.86, p: 6 },
-    { x: 400, y: 530, s: 0.94, p: 7 },
-    { x: 262, y: 560, s: 0.74, p: 3 },
-    { x: 540, y: 556, s: 0.74, p: 0 },
+    { x: 366, y: 190, s: 1.12, p: 0 },
+    { x: 232, y: 322, s: 0.92, p: 1 },
+    { x: 566, y: 258, s: 0.88, p: 2 },
+    { x: 322, y: 446, s: 1.02, p: 3 },
+    { x: 492, y: 378, s: 1.06, p: 4 },
+    { x: 158, y: 498, s: 0.78, p: 5 },
+    { x: 648, y: 436, s: 0.82, p: 6 },
+    { x: 418, y: 548, s: 0.9, p: 7 },
+    { x: 272, y: 606, s: 0.7, p: 3 },
+    { x: 590, y: 574, s: 0.66, p: 0 },
   ];
-  FL.forEach((f, i) => { f.i = i; f.ph = rnd(0, 6.28); f.rotJ = rnd(-0.12, 0.12); f.bx = BASE.x + (i - 4.5) * 3; });
+  FL.forEach((f, i) => {
+    f.i = i; f.ph = rnd(0, 6.28); f.rotJ = rnd(-0.32, 0.32);
+    f.bx = BASE.x + rnd(-16, 16);
+    f.cb = rnd(-46, 46);              /* curvatura propia del tallo */
+    f.sw = rnd(4, 6);                 /* grosor del tallo */
+    f.sx = rnd(0.92, 1.06);           /* la flor se ve un poco girada */
+    f.tilt = rnd(0.78, 1.0);
+    f.j = Array.from({ length: 6 }, () => ({ da: rnd(-10, 10), l: rnd(0.86, 1.12), w: rnd(0.86, 1.14), sk: rnd(-0.16, 0.16) }));
+    f.buds = Array.from({ length: Math.random() < 0.7 ? (Math.random() < 0.5 ? 1 : 2) : 0 }, (_, k) => ({ u: rnd(0.55, 0.86) - k * 0.12, side: Math.random() < 0.5 ? -1 : 1, sz: rnd(0.26, 0.4) }));
+    f.bud = { sx: 1, tilt: 0.95, j: Array.from({ length: 6 }, () => ({ da: rnd(-6, 6), l: 1, w: 1, sk: rnd(-0.1, 0.1) })) };
+  });
   const drawOrder = FL.slice().sort((a, b) => a.y - b.y);
 
-  /* hojas: [ángulo, largo, ancho, curvatura, retraso] */
-  const LEAVES = [
-    [-80, 215, 30, -46, 1.7], [-66, 305, 38, -52, 1.0], [-44, 345, 40, -36, 1.25], [-22, 300, 34, -18, 1.55],
-    [22, 310, 34, 18, 1.45], [46, 345, 40, 36, 1.15], [68, 292, 38, 52, 0.9], [80, 215, 30, 46, 1.65],
+  /* hojas: cada una nace con su propio ángulo, largo, ancho y curva */
+  const LEAF_TONES = [
+    ['#0f3f1c', '#1f7a38', '#58b868'],
+    ['#0c3a24', '#17693f', '#3fa06a'],
+    ['#1a4a16', '#3b8a2c', '#7cc64a'],
   ];
+  const LEAVES = Array.from({ length: 11 }, () => {
+    const a = rnd(-98, 98);
+    const out = a < 0 ? -1 : 1;
+    return {
+      a, L: rnd(150, 345) * (Math.abs(a) > 80 ? 0.7 : 1),
+      w1: rnd(22, 44), w2: rnd(22, 44), b: out * rnd(-20, 75),
+      d: rnd(0.8, 2.4), ph: rnd(0, 6.28),
+      x: BASE.x + rnd(-18, 18), y: BASE.y + rnd(-6, 14),
+      tone: Math.floor(rnd(0, 3)), back: Math.random() < 0.4,
+    };
+  });
 
   /* estrellas y partículas */
   const STARS = Array.from({ length: 110 }, () => ({ x: Math.random(), y: Math.random(), r: rnd(0.4, 1.5), ph: rnd(0, 6.28), sp: rnd(0.6, 2.2) }));
@@ -134,11 +167,12 @@
     ctx.closePath();
   }
 
-  function petal(ang, L, Wd, c1, c2, e, open) {
+  function petal(ang, L, Wd, c1, c2, e, open, sk) {
     if (e <= 0.01) return;
     ctx.save();
     ctx.rotate(rad(ang * (0.12 + 0.88 * clamp(open, 0, 1.15))));
     ctx.scale(e, e);
+    ctx.transform(1, 0, sk || 0, 1, 0, 0);
     petalPath(L, Wd);
     const g = ctx.createLinearGradient(0, 0, 0, -L);
     g.addColorStop(0, c1);
@@ -166,12 +200,12 @@
     ctx.restore();
   }
 
-  function orchid(x, y, size, rot, pal, bloom, t) {
+  function orchid(x, y, size, rot, pal, bloom, t, f) {
     const P = PAL[pal];
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rot);
-    ctx.scale(size, size);
+    ctx.scale(size * f.sx, size * f.tilt);
 
     /* resplandor suave */
     const glow = ctx.createRadialGradient(0, 0, 10, 0, 0, 120);
@@ -182,17 +216,19 @@
 
     const E = i => easeBack(clamp((bloom - i * 0.07) / 0.55));
     const O = i => easeOut(clamp((bloom - 0.05 - i * 0.07) / 0.7));
-    petal(-148, 88, 40, P.in, P.out, E(0), O(0));      /* sépalo inf. izq. */
-    petal(148, 88, 40, P.in, P.out, E(1), O(1));       /* sépalo inf. der. */
-    petal(0, 94, 44, P.in, P.out, E(2), O(2));         /* sépalo superior */
-    petal(-80, 94, 64, P.in, P.out, E(3), O(3));       /* pétalo grande izq. */
-    petal(80, 94, 64, P.in, P.out, E(4), O(4));        /* pétalo grande der. */
+    const J = f.j;
+    const pt = (i, ang, L, Wd) => petal(ang + J[i].da, L * J[i].l, Wd * J[i].w, P.in, P.out, E(i), O(i), J[i].sk);
+    pt(0, -148, 88, 40);   /* sépalo inf. izq. */
+    pt(1, 148, 88, 40);    /* sépalo inf. der. */
+    pt(2, 0, 94, 44);      /* sépalo superior */
+    pt(3, -80, 94, 64);    /* pétalo grande izq. */
+    pt(4, 80, 94, 64);     /* pétalo grande der. */
 
     /* labelo */
     const eL = E(5);
     if (eL > 0.01) {
       ctx.save();
-      ctx.rotate(rad(180 * (0.12 + 0.88 * clamp(O(5), 0, 1.1))));
+      ctx.rotate(rad((180 + J[5].da) * (0.12 + 0.88 * clamp(O(5), 0, 1.1))));
       ctx.scale(eL, eL);
       petalPath(52, 27);
       const lg = ctx.createLinearGradient(0, 0, 0, -52);
@@ -231,24 +267,32 @@
     return { x: v * v * a.x + 2 * v * u * c.x + u * u * b.x, y: v * v * a.y + 2 * v * u * c.y + u * u * b.y };
   };
 
-  function leaf(def, t, sway) {
-    const [ang, L, w, bend, d] = def;
-    const g = easeOut(clamp((t - d) / 2.6));
+  function leaf(l, t, swayAmt) {
+    const g = easeOut(clamp((t - l.d) / 2.8));
     if (g <= 0) return;
+    const sw = Math.sin(t * 0.7 + l.ph) * swayAmt;
+    const L = l.L, b = l.b + sw * 6;
     ctx.save();
-    ctx.translate(BASE.x, BASE.y + 6);
-    ctx.rotate(rad(ang) + sway * 0.03 * Math.sign(ang));
+    ctx.translate(l.x, l.y);
+    ctx.rotate(rad(l.a) + sw * 0.035);
     ctx.scale(g, g);
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.quadraticCurveTo(-w + bend * 0.5, -L * 0.5, bend, -L);
-    ctx.quadraticCurveTo(w + bend * 0.5, -L * 0.5, 0, 0);
-    const gr = ctx.createLinearGradient(0, 0, bend, -L);
-    gr.addColorStop(0, '#0f3f1c'); gr.addColorStop(0.5, '#1f7a38'); gr.addColorStop(1, '#58b868');
+    ctx.bezierCurveTo(-l.w1, -L * 0.25, -l.w1 * 0.8 + b * 0.6, -L * 0.72, b, -L);
+    ctx.bezierCurveTo(l.w2 * 0.8 + b * 0.6, -L * 0.72, l.w2, -L * 0.25, 0, 0);
+    ctx.closePath();
+    const c = LEAF_TONES[l.tone];
+    const gr = ctx.createLinearGradient(0, 0, b, -L);
+    gr.addColorStop(0, c[0]); gr.addColorStop(0.5, c[1]); gr.addColorStop(1, c[2]);
     ctx.fillStyle = gr; ctx.fill();
-    ctx.save(); ctx.clip(); ctx.globalAlpha = 0.2; ctx.fillStyle = grainPat; ctx.fillRect(-100, -L - 20, 200 + Math.abs(bend), L + 40); ctx.restore();
-    ctx.strokeStyle = 'rgba(190,255,200,.28)'; ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(bend * 0.3, -L * 0.5, bend, -L); ctx.stroke();
+    ctx.save(); ctx.clip();
+    ctx.globalAlpha = 0.2; ctx.fillStyle = grainPat; ctx.fillRect(-200, -L - 20, 400, L + 40);
+    ctx.globalAlpha = 0.35; ctx.strokeStyle = c[2]; ctx.lineWidth = 5; ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(200,255,205,.3)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(0, 0);
+    ctx.bezierCurveTo((l.w2 - l.w1) / 2, -L * 0.25, (l.w2 - l.w1) * 0.4 + b * 0.6, -L * 0.72, b, -L);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -294,10 +338,11 @@
       const sx = swayAmt * Math.sin(t * 0.9 + f.ph) * 7;
       const H_ = { x: f.x + sx, y: f.y + swayAmt * Math.cos(t * 0.7 + f.ph) * 2 };
       const B_ = { x: f.bx, y: BASE.y };
-      const C_ = { x: B_.x + (H_.x - B_.x) * 0.12 + sx * 0.3, y: B_.y + (H_.y - B_.y) * 0.62 };
+      const C_ = { x: B_.x + (H_.x - B_.x) * 0.12 + sx * 0.3 + f.cb, y: B_.y + (H_.y - B_.y) * 0.62 };
       return { f, st, dur, sp, H_, B_, C_ };
     });
 
+    LEAVES.filter(l => l.back).forEach(l => leaf(l, t, swayAmt));
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const g of geo) {
       if (g.sp <= 0.001) continue;
@@ -307,12 +352,12 @@
         const p = qb(g.B_, g.C_, g.H_, (k / n) * g.sp);
         k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y);
       }
-      ctx.strokeStyle = '#1d6a30'; ctx.lineWidth = 5.5; ctx.stroke();
+      ctx.strokeStyle = '#1d6a30'; ctx.lineWidth = g.f.sw; ctx.stroke();
       ctx.strokeStyle = 'rgba(150,235,160,.35)'; ctx.lineWidth = 1.5; ctx.stroke();
     }
 
     /* hojas */
-    LEAVES.forEach(l => leaf(l, t, sw0 * swayAmt));
+    LEAVES.filter(l => !l.back).forEach(l => leaf(l, t, swayAmt));
 
     /* lazo */
     ribbon(easeBack(clamp((t - 4.2) / 1.1)));
@@ -328,7 +373,17 @@
       const rot = Math.atan2(dx, -dy) * 0.75 + f.rotJ + swayAmt * Math.sin(t * 0.9 + f.ph) * 0.035;
       const bloom = clamp((t - (g.st + g.dur * 0.8)) / 2.6);
       const size = 0.9 * f.s * (0.3 + 0.7 * easeOut(bloom)) * easeOut(clamp(g.sp * 1.4));
-      orchid(tip.x, tip.y, size, rot, f.p, bloom, t);
+      for (const bd of f.buds) {
+        if (g.sp <= bd.u) continue;
+        const bp = qb(g.B_, g.C_, g.H_, bd.u);
+        const bb = clamp((t - (g.st + g.dur * bd.u + 0.6)) / 3.2);
+        if (bb <= 0) continue;
+        const off = bd.side * 16 * (0.5 + 0.5 * bb);
+        ctx.strokeStyle = '#1d6a30'; ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.moveTo(bp.x, bp.y); ctx.quadraticCurveTo(bp.x + off * 0.4, bp.y - 3, bp.x + off, bp.y - 8); ctx.stroke();
+        orchid(bp.x + off, bp.y - 8, 0.9 * f.s * bd.sz * (0.5 + 0.5 * easeOut(bb)), bd.side * 0.5, f.p, 0.1 + 0.22 * bb, t, f.bud);
+      }
+      orchid(tip.x, tip.y, size, rot, f.p, bloom, t, f);
     }
 
     drawName(t);
@@ -393,11 +448,68 @@
   }
 
   /* ---------- bucle principal ---------- */
-  let t0 = performance.now();
-  cv.addEventListener('click', () => { t0 = performance.now(); });
+  let t0 = performance.now(), started = false;
+  const startEl = document.getElementById('start');
+  const bgm = document.getElementById('bgm');
+  const muteBtn = document.getElementById('mute');
+  /* ===== MÚSICA =====
+     Pega aquí el ID del video de YouTube (lo que va después de v= en el enlace).
+     Ejemplo: https://www.youtube.com/watch?v=ABC123xyz  ->  'ABC123xyz'
+     Si lo dejas vacío, se usa el archivo music/cancion.mp3 */
+  const YT_ID = '66A_3uwuZ_I';
+
+  let fadeTimer = null, musicOn = false, yt = null, ytReady = false, vol = 0;
+  function setVol(v) {
+    vol = v;
+    if (YT_ID) { if (ytReady) yt.setVolume(Math.round(v * 100)); }
+    else bgm.volume = v;
+  }
+  function fadeIn() {
+    clearInterval(fadeTimer);
+    setVol(0);
+    fadeTimer = setInterval(() => {
+      setVol(Math.min(0.8, vol + 0.04));
+      if (vol >= 0.8) clearInterval(fadeTimer);
+    }, 150);
+  }
+  function playMusic() {
+    musicOn = true;
+    if (YT_ID) { if (ytReady) { yt.playVideo(); fadeIn(); } }   /* si aún no carga, onReady lo inicia */
+    else { const pr = bgm.play(); if (pr && pr.catch) pr.catch(() => {}); fadeIn(); }
+  }
+  function pauseMusic() {
+    musicOn = false;
+    clearInterval(fadeTimer);
+    if (YT_ID) { if (ytReady) yt.pauseVideo(); } else bgm.pause();
+  }
+  if (YT_ID) {
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(tag);
+    window.onYouTubeIframeAPIReady = () => {
+      yt = new YT.Player('yt', {
+        videoId: YT_ID,
+        playerVars: { playsinline: 1, controls: 0, disablekb: 1, rel: 0, modestbranding: 1 },
+        events: {
+          onReady: () => { ytReady = true; if (musicOn) { yt.playVideo(); fadeIn(); } },
+          onStateChange: e => { if (e.data === 0) { yt.seekTo(0); yt.playVideo(); } }
+        }
+      });
+    };
+  }
+  startEl.addEventListener('click', () => {
+    started = true; t0 = performance.now();
+    startEl.classList.add('hide');
+    playMusic();
+  });
+  muteBtn.addEventListener('click', () => {
+    if (musicOn) { pauseMusic(); muteBtn.classList.add('off'); }
+    else { playMusic(); muteBtn.classList.remove('off'); }
+  });
+  cv.addEventListener('click', () => { if (started) t0 = performance.now(); });
 
   function frame(now) {
-    const t = (now - t0) / 1000;
+    const t = started ? (now - t0) / 1000 : 0;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
